@@ -1,3 +1,9 @@
+# FORK NOTE
+This is a special build of ReShade catered to NFS games made by EA Black Box.
+Currently the only difference is that the rendering is done BEFORE FrontEnd, so the UI isn't affected by post-processing effects.
+
+# ORIGINAL DESCRIPTION
+
 ReShade
 =======
 
