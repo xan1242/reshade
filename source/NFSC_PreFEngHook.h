@@ -1,0 +1,8 @@
+#pragma once
+// NFS Carbon - ReShade Pre FENg Hook
+#define FEMANAGER_RENDER_HOOKADDR1 0x00731138
+#define FEMANAGER_RENDER_HOOKADDR2 0x00731138
+#define FEMANAGER_RENDER_ADDRESS 0x005915D0
+#define NFS_D3D9_DEVICE_ADDRESS 0x00AB0ABC
+
+void __stdcall FEManager_Render_Hook();

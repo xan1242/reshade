@@ -10,6 +10,20 @@
 #include <cassert>
 #include <Psapi.h>
 #include <Windows.h>
+// NFS changes
+#include "nfsincludes/injector/injector.hpp"
+#ifdef GAME_MW
+#include "NFSMW_PreFEngHook.h"
+#endif
+#ifdef GAME_CARBON
+#include "NFSC_PreFEngHook.h"
+#endif
+#ifdef GAME_UG2
+#include "NFSU2_PreFEngHook.h"
+#endif
+#ifdef GAME_UG
+#include "NFSU_PreFEngHook.h"
+#endif
 
 HMODULE g_module_handle = nullptr;
 std::filesystem::path g_reshade_dll_path;
@@ -899,6 +913,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		hooks::register_module(get_system_path() / "dxgi.dll");
 		hooks::register_module(get_system_path() / "opengl32.dll");
 		// Do not register Vulkan hooks, since Vulkan layering mechanism is used instead
+
+		// NFS INJECTION
+		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR1, FEManager_Render_Hook, true);
+		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR2, FEManager_Render_Hook, true);
 
 		LOG(INFO) << "Initialized.";
 		break;

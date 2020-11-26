@@ -362,6 +362,18 @@
     <ClInclude Include="res\version.h">
       <Filter>resources</Filter>
     </ClInclude>
+    <ClInclude Include="source\NFSMW_PreFEngHook.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="source\NFSC_PreFEngHook.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="source\NFSU2_PreFEngHook.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="source\NFSU_PreFEngHook.h">
+      <Filter>core</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res\resource.rc">
