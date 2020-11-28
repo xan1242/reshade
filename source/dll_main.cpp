@@ -24,6 +24,12 @@
 #ifdef GAME_UG
 #include "NFSU_PreFEngHook.h"
 #endif
+#ifdef GAME_PS
+#include "NFSPS_PreFEngHook.h"
+#endif
+#ifdef GAME_UC
+#include "NFSUC_PreFEngHook.h"
+#endif
 
 HMODULE g_module_handle = nullptr;
 std::filesystem::path g_reshade_dll_path;
@@ -915,8 +921,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		// Do not register Vulkan hooks, since Vulkan layering mechanism is used instead
 
 		// NFS INJECTION
+#ifndef GAME_UC
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR1, FEManager_Render_Hook, true);
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR2, FEManager_Render_Hook, true);
+#else
+		injector::MakeJMP(FEMANAGER_RENDER_HOOKADDR1, ReShade_EntryPoint, true);
+#endif
 
 		LOG(INFO) << "Initialized.";
 		break;

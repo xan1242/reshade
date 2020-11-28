@@ -1,0 +1,10 @@
+#pragma once
+// NFS Pro Street - ReShade Pre FENg Hook
+// CURRENTLY IMPOSSIBLE TO PORT TO THIS GAME
+// Thanks SecuRom!
+#define FEMANAGER_RENDER_HOOKADDR1 0x004B1AC9
+#define FEMANAGER_RENDER_HOOKADDR2 0x004B1AC9
+#define FEMANAGER_RENDER_ADDRESS 0x4A9EA0
+#define NFS_D3D9_DEVICE_ADDRESS *(int*)0x00AC6ED4
+
+void __stdcall FEManager_Render_Hook();

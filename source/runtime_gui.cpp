@@ -17,6 +17,24 @@
 #include <fstream>
 #include <algorithm>
 #include <shellapi.h>
+#ifdef GAME_MW
+#include "NFSMW_PreFEngHook.h"
+#endif
+#ifdef GAME_CARBON
+#include "NFSC_PreFEngHook.h"
+#endif
+#ifdef GAME_UG2
+#include "NFSU2_PreFEngHook.h"
+#endif
+#ifdef GAME_UG
+#include "NFSU_PreFEngHook.h"
+#endif
+#ifdef GAME_PS
+#include "NFSPS_PreFEngHook.h"
+#endif
+#ifdef GAME_UC
+#include "NFSUC_PreFEngHook.h"
+#endif
 
 using namespace reshade::gui;
 
@@ -82,6 +100,7 @@ void reshade::runtime::init_gui()
 	subscribe_to_ui("Statistics", [this]() { draw_gui_statistics(); });
 	subscribe_to_ui("Log", [this]() { draw_gui_log(); });
 	subscribe_to_ui("About", [this]() { draw_gui_about(); });
+	subscribe_to_ui("NFS Tweaks", [this]() { draw_gui_nfs(); });
 
 	_load_config_callables.push_back([this, &imgui_io, &imgui_style](const ini_file &config) {
 		config.get("INPUT", "KeyOverlay", _overlay_key_data);
@@ -1962,6 +1981,17 @@ This Font Software is licensed under the SIL Open Font License, Version 1.1. (ht
 	}
 
 	ImGui::PopTextWrapPos();
+}
+
+void reshade::runtime::draw_gui_nfs()
+{
+	// crude implementation
+	ImGui::TextUnformatted("NFS Tweak Menu");
+	ImGui::Separator();
+	ImGui::Checkbox("Draw FrontEnd", (bool*)DRAW_FENG_BOOL_ADDR);
+#ifdef GAME_UC
+	ImGui::SliderFloat("Bloom Scale", (float*)0x00D5E154, -10.0, 10.0, "%.3f", ImGuiSliderFlags_None);
+#endif
 }
 
 void reshade::runtime::draw_code_editor()

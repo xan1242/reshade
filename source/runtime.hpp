@@ -367,6 +367,7 @@ namespace reshade
 		void draw_gui_statistics();
 		void draw_gui_log();
 		void draw_gui_about();
+		void draw_gui_nfs();
 
 		void draw_code_editor();
 		void draw_code_viewer();

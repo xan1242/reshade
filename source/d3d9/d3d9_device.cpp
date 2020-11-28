@@ -20,6 +20,12 @@
 #ifdef GAME_UG
 #include "NFSU_PreFEngHook.h"
 #endif
+#ifdef GAME_PS
+#include "NFSPS_PreFEngHook.h"
+#endif
+#ifdef GAME_UC
+#include "NFSUC_PreFEngHook.h"
+#endif
 
 extern void dump_and_modify_present_parameters(D3DPRESENT_PARAMETERS &pp, IDirect3D9 *d3d, UINT adapter_index);
 extern void dump_and_modify_present_parameters(D3DPRESENT_PARAMETERS &pp, D3DDISPLAYMODEEX &fullscreen_desc, IDirect3D9Ex *d3d, UINT adapter_index);
@@ -892,6 +898,8 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetDisplayModeEx(UINT iSwapChain, D3D
 	assert(_implicit_swapchain->_extended_interface);
 	return static_cast<IDirect3DSwapChain9Ex *>(_implicit_swapchain)->GetDisplayModeEx(pMode, pRotation);
 }
+
+#ifndef GAME_UC
 void(__thiscall* FEManager_Render)(unsigned int dis) = (void(__thiscall*)(unsigned int))FEMANAGER_RENDER_ADDRESS;
 void __stdcall FEManager_Render_Hook()
 {
@@ -901,3 +909,23 @@ void __stdcall FEManager_Render_Hook()
 	g_pd3dDevice->_implicit_swapchain->_runtime->on_nfs_present(); // render ReShade BEFORE FE renders ingame! TODO: dig deeper and make ONLY ReShade UI above the FE!
 	return FEManager_Render(TheThis);
 }
+#else
+void __stdcall ReShade_Hook()
+{
+	Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
+	g_pd3dDevice->_implicit_swapchain->_runtime->on_nfs_present(); // render ReShade BEFORE FE renders ingame! TODO: dig deeper and make ONLY ReShade UI above the FE!
+}
+
+int NFSUC_ExitPoint1 = NFSUC_EXIT1;
+int NFSUC_ExitPoint2 = NFSUC_EXIT2;
+int NFSUC_EntryPoint_EBX = 0;
+void __declspec(naked) ReShade_EntryPoint()
+{
+	_asm mov NFSUC_EntryPoint_EBX, ebx
+	ReShade_Hook();
+	if (*(bool*)(NFSUC_EntryPoint_EBX + 0xA))
+		_asm jmp NFSUC_ExitPoint1
+	_asm jmp NFSUC_ExitPoint2
+}
+
+#endif
