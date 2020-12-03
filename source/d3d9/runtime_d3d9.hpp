@@ -20,6 +20,7 @@ namespace reshade::d3d9
 		bool on_init(const D3DPRESENT_PARAMETERS &pp);
 		void on_reset();
 		void on_present();
+		void on_gui_present();
 		void on_nfs_present();
 
 		bool capture_screenshot(uint8_t *buffer) const override;

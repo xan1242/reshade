@@ -1983,17 +1983,1245 @@ This Font Software is licensed under the SIL Open Font License, Version 1.1. (ht
 	ImGui::PopTextWrapPos();
 }
 
+// NFS DEBUG/TWEAK MENU
+// NFS CODE START
+struct bVector3 // same as UMath::Vector3 anyways...
+{
+	float x;
+	float y;
+	float z;
+};
+
+bVector3 TeleportPos = { 0 };
+
+#ifndef OLD_NFS
+int ActiveHotPos = 0;
+
+void(*Sim_SetStream)(bVector3* location, bool blocking) = (void(*)(bVector3*, bool))SIM_SETSTREAM_ADDR;
+bool(__thiscall*WCollisionMgr_GetWorldHeightAtPointRigorous)(void* dis, bVector3* pt, float* height, bVector3* normal) = (bool(__thiscall*)(void*, bVector3*, float*, bVector3*))WCOLMGR_GETWORLDHEIGHT_ADDR;
+
+#if defined(GAME_MW) || defined(GAME_CARBON)
+void __stdcall JumpToNewPos(bVector3* pos)
+{
+	int FirstLocalPlayer = **(int**)PLAYER_LISTABLESET_ADDR;
+	int LocalPlayerVtable;
+	bVector3 ActualTeleportPos = { -(*pos).y, (*pos).z, (*pos).x }; // wtf i dont even
+	float Height = (*pos).z;
+	char WCollisionMgrSpace[0x20] = { 0 };
+
+	void(__thiscall*LocalPlayer_SetPosition)(void* dis, bVector3 *position);
+
+	if (FirstLocalPlayer)
+	{
+		Sim_SetStream(&ActualTeleportPos, true);
+
+		if (!WCollisionMgr_GetWorldHeightAtPointRigorous(WCollisionMgrSpace, &ActualTeleportPos, &Height, NULL))
+		{
+			ActualTeleportPos.y = (*pos).z + 1.0; // actually Z, as noted by the previous wtf
+		}
+
+
+		LocalPlayerVtable = *(int*)(FirstLocalPlayer);
+		LocalPlayer_SetPosition = (void(__thiscall*)(void*, bVector3*))*(int*)(LocalPlayerVtable+0x10);
+		LocalPlayer_SetPosition((void*)FirstLocalPlayer, &ActualTeleportPos);
+	}
+}
+#else
+// Undercover & ProStreet are special beings. They're actually multi threaded.
+// We have to do teleporting during EMainService / World::Service (or same at least in the same thread as World updates), otherwise we cause hanging bugs...
+
+bool bDoTeleport = false;
+bVector3 ServiceTeleportPos = { 0 };
+
+void __stdcall JumpToNewPosPropagator(bVector3* pos)
+{
+	int FirstLocalPlayer = **(int**)PLAYER_LISTABLESET_ADDR;
+	int LocalPlayerVtable;
+	bVector3 ActualTeleportPos = { -(*pos).y, (*pos).z, (*pos).x }; // wtf i dont even
+	char WCollisionMgrSpace[0x20] = { 0 };
+
+	void(__thiscall * LocalPlayer_SetPosition)(void* dis, bVector3 * position);
+
+	if (FirstLocalPlayer)
+	{
+		Sim_SetStream(&ActualTeleportPos, true);
+
+		if (!WCollisionMgr_GetWorldHeightAtPointRigorous(WCollisionMgrSpace, &ActualTeleportPos, &((*pos).z), NULL))
+		{
+			ActualTeleportPos.y = (*pos).z + 1.0; // actually Z, as noted by the previous wtf
+		}
+
+
+		LocalPlayerVtable = *(int*)(FirstLocalPlayer);
+		LocalPlayer_SetPosition = (void(__thiscall*)(void*, bVector3*)) * (int*)(LocalPlayerVtable + 0x10);
+		LocalPlayer_SetPosition((void*)FirstLocalPlayer, &ActualTeleportPos);
+	}
+}
+
+void __stdcall JumpToNewPos(bVector3* pos)
+{
+	memcpy(&ServiceTeleportPos, pos, sizeof(bVector3));
+	bDoTeleport = true;
+}
+
+void __stdcall MainService_Hook()
+{
+	if (bDoTeleport)
+	{
+		JumpToNewPosPropagator(&ServiceTeleportPos);
+		bDoTeleport = false;
+	}
+}
+
+#endif
+#else
+#ifdef GAME_UG2
+void(__thiscall* Car_ResetToPosition)(unsigned int dis, bVector3* position, float unk, short int angle, bool unk2) = (void(__thiscall*)(unsigned int, bVector3*, float, short int, bool))CAR_RESETTOPOS_ADDR;
+
+void __stdcall JumpToNewPos(bVector3* pos)
+{
+	int FirstLocalPlayer = *(int*)PLAYERBYINDEX_ADDR;
+
+	if (FirstLocalPlayer)
+	{
+		Car_ResetToPosition(*(unsigned int*)(FirstLocalPlayer + 4), pos, 0, 0, false);
+	}
+}
+#else
+// Since Undergound 1 on PC was compiled with GOD AWFUL OPTIMIZATIONS, the actual function symbol definition does not match (like it does in *gasp* other platforms and Underground 2)
+// Arguments are passed through registers... REGISTERS. ON x86!
+// THIS ISN'T MIPS OR PPC FOR CRYING OUT LOUD
+// What devilish compiler setting even is this?
+// Anyhow, it's still a thiscall, except, get this, POSITION and ANGLE are passed through EDX and EAX respectively
+// So it's not even in ORDER, it's ARGUMENT 1 and ARGUMENT 3
+void(__thiscall* Car_ResetToPosition)(unsigned int dis, float unk, bool unk2) = (void(__thiscall*)(unsigned int, float, bool))CAR_RESETTOPOS_ADDR;
+
+void __stdcall JumpToNewPos(bVector3* pos)
+{
+	int FirstLocalPlayer = *(int*)PLAYERBYINDEX_ADDR;
+
+	if (FirstLocalPlayer)
+	{
+		_asm
+		{
+			mov edx, pos
+			xor eax, eax
+		}
+		Car_ResetToPosition(*(unsigned int*)(FirstLocalPlayer + 4), 0, false);
+	}
+}
+#endif
+
+#endif
+
 void reshade::runtime::draw_gui_nfs()
 {
-	// crude implementation
 	ImGui::TextUnformatted("NFS Tweak Menu");
 	ImGui::Separator();
 	ImGui::Checkbox("Draw FrontEnd", (bool*)DRAW_FENG_BOOL_ADDR);
 #ifdef GAME_UC
 	ImGui::SliderFloat("Bloom Scale", (float*)0x00D5E154, -10.0, 10.0, "%.3f", ImGuiSliderFlags_None);
 #endif
-}
+#ifndef OLD_NFS
+	if (ImGui::CollapsingHeader("Car", ImGuiTreeNodeFlags_None))
+	{
+		ImGui::TextUnformatted("WARNING: Car changing is unstable and may cause the game to crash!");
+		if (ImGui::Button("Change Car", ImVec2(ImGui::CalcItemWidth(), 0)))
+		{
+			*(bool*)CHANGEPLAYERVEHICLE_ADDR = true;
+		}
+	}
+	ImGui::Separator();
+#endif
+	if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_None))
+	{
+		ImGui::InputFloat("X", &TeleportPos.x, 0, 0, "%.3f", ImGuiInputTextFlags_CharsScientific);
+		ImGui::InputFloat("Y", &TeleportPos.y, 0, 0, "%.3f", ImGuiInputTextFlags_CharsScientific);
+		ImGui::InputFloat("Z", &TeleportPos.z, 0, 0, "%.3f", ImGuiInputTextFlags_CharsScientific);
+		if (ImGui::Button("Engage!", ImVec2(ImGui::CalcItemWidth(), 0)))
+		{
+			JumpToNewPos(&TeleportPos);
+		}
+		ImGui::Separator();
 
+#ifdef OLD_NFS
+#ifdef GAME_UG2
+		ImGui::TextUnformatted("Hot Position"); // TODO: maybe port over Hot Position from UG2 to UG1?
+		if (ImGui::Button("Save", ImVec2(10 * _font_size - _imgui_context->Style.ItemSpacing.x, 0)))
+		{
+			*(bool*)SAVEHOTPOS_ADDR = true;
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Load", ImVec2(10 * _font_size - _imgui_context->Style.ItemSpacing.x, 0)))
+		{
+			*(bool*)LOADHOTPOS_ADDR = true;
+		}
+		ImGui::Separator();
+#endif
+#else
+		ImGui::InputInt("Hot Position", &ActiveHotPos, 1, 1, ImGuiInputTextFlags_CharsDecimal);
+		if (ActiveHotPos <= 0)
+			ActiveHotPos = 1;
+		ActiveHotPos %= 6;
+		if (ImGui::Button("Save", ImVec2(10 * _font_size - _imgui_context->Style.ItemSpacing.x, 0)))
+		{
+			*(int*)SAVEHOTPOS_ADDR = ActiveHotPos;
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Load", ImVec2(10 * _font_size - _imgui_context->Style.ItemSpacing.x, 0)))
+		{
+			*(int*)LOADHOTPOS_ADDR = ActiveHotPos;
+		}
+		ImGui::Separator();
+#endif		
+
+#ifdef GAME_UG
+		if (ImGui::CollapsingHeader("Landmarks (Underground 1 World) (L1RA)", ImGuiTreeNodeFlags_None))
+		{
+			ImGui::TextUnformatted("Sorry, no landmarks for Underground 1 yet :("); // TODO: make landmarks for UG1 Free Roam (it's such a small map anyway...)
+		}
+		ImGui::Separator();
+#endif
+
+#ifdef GAME_UG2
+		if (ImGui::CollapsingHeader("Landmarks (Underground 2 World) (L4RA)", ImGuiTreeNodeFlags_None))
+		{
+			if (ImGui::Button("Garage", ImVec2(ImGui::CalcItemWidth(), 0)))
+			{
+				bVector3 pos = { 654.59, -102.02,   15.75 };
+				JumpToNewPos(&pos);
+			}
+			if (ImGui::CollapsingHeader("Airport", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Terminal Station", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1871.38, -829.58,   34.08 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Parking Lot Front", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1831.13, -818.90,   24.08 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Parking Lot Behind", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1722.82, -795.87,   23.96 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("City Core", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Stadium Entrance", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1183.45, -646.81, 18.03 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Stadium Parking Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1016.02, -849.46, 17.99 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("South Market - Casino Fountain", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -326.62, -559.63, 19.95 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Fort Union Square", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 212.86, -438.44, 18.03 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Best Buy", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 485.37, -617.05, 18.08 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hotel Plaza", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -282.70, 81.08, 8.39 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hotel Plaza Fountain", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -433.37, -170.49, 25.98 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Convention Center", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -632.79, 59.24, 10.59 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Main Street", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -758.48, -176.86, 29.38 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Construction Road 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 148.85, -830.72, 17.52 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Construction Road 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 36.05, -27.53, 16.36 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Parking Garage", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 154.32, 404.37, 4.57 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Basketball Court", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 523.90, -783.58, 8.37 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hotel Plaza Parking Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -225.51, 315.23, 1.08 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Beacon Hill", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Parking Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -649.46, 585.84, 25.21 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Burger King", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1390.40, 199.50, 11.03 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Park & Boardwalk", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1638.55, 433.51, 4.35 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1170.94, 564.39, 30.19 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Back Alley Shortcut", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1260.51, 778.16, 48.05 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Restaurant Back Alley", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1004.35, 705.92, 35.82 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Zigzag Bottom", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1643.70, 690.86, 2.73 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Zigzag Top", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1463.39, 859.80, 42.42 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Bridge", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -381.70, 709.03, 26.12 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Pigeon Park", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Glass Garden", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -10.06, 827.62, 33.57 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Mansion", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 534.27, 988.52, 33.41 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Pavilion 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 376.73, 1170.13, 35.19 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Pavilion 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 207.75, 1335.30, 49.13 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("BBQ Restaurant", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -185.32, 1599.37, 43.84 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Fountain", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -124.09, 1519.45, 39.65 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Brad Lawless Memorial Statue", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -505.99, 1190.16, 47.18 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Jackson Heights", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Entrance Gate", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1494.47, 1047.15, 52.78 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Waterfall Bridge 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2126.07, 1651.40, 130.54 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Waterfall Bridge 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2648.50, 2240.41, 229.08 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Large Mansion", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -3085.82, 2334.12, 262.17 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Mansion 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -720.69, 1853.10, 154.16 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Observatory", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2067.00, 2794.99, 318.93 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Observatory Tunnel", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1499.79, 2219.02, 208.01 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Parking Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2024.93, 2587.49, 325.54 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Radio Tower", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1205.87, 3119.98, 375.72 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("City Vista", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2155.04, 2016.00, 218.18 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Coal Harbor", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Shipyard", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -687.03, -1433.25, 18.63 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Trainyard", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1031.52, -1782.72, 16.20 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -243.80, -1537.74, 13.95 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Trashyard", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1397.31, -1544.86, 13.85 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Refinery", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 253.64, -1886.44, 14.01 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("East Hwy Entrance", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 926.80, -1231.56, 14.07 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Highway", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Hwy 7 North ", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 305.70, -1681.59, 21.09 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hwy 7 South", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 859.69, -369.76, 18.73 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hwy 27 North", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 208.38, -1013.74, 25.98 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hwy 27 East", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1147.26, -270.31, 25.68 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hwy 27 South", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 69.73, 317.97, 11.17 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hwy 27 West", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1194.52, -212.97, 24.94 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Shops", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::CollapsingHeader("City Center Shops", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Car Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -728.10, -881.46,   18.11 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Performance", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1051.87, -147.84,   17.19 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("El Norte Performance", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 337.01, -756.14,   13.39 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Body", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -387.00,   37.17,   14.15 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("El Norte Body", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 479.72,  122.67,   10.16 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Graphics", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -278.93, -464.33,   20.14 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Specialty", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1267.26, -616.56,   19.93 };
+						JumpToNewPos(&pos);
+					}
+
+				}
+				if (ImGui::CollapsingHeader("Beacon Hill Shops", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Car Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -974.43,  413.24,   11.80 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Performance", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1306.92,  355.72,    9.27 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Body", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -994.29,  818.47,   39.12 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Graphics", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -491.38,  714.42,   29.13 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Specialty", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1456.41,  688.46,   24.16 };
+						JumpToNewPos(&pos);
+					}
+
+				}
+				if (ImGui::CollapsingHeader("Jackson Heights Shops", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Body", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1928.18, 1130.85,   61.72 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Graphics", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1886.35, 1157.29,   61.63 };
+						JumpToNewPos(&pos);
+					}
+
+				}
+				if (ImGui::CollapsingHeader("Coal Harbor Shops", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Car Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 37.30,-1718.94,   14.15 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("East Performance", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 840.05,-1404.39,    9.50 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("East Body", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -69.84,-1474.95,   13.92 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Graphics", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 456.23,-1553.53,   13.92 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("East Specialty", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 731.82,-1174.17,   13.57 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("West Performance", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -527.15,-1566.07,   13.93 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("West Body", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -546.54,-1893.46,    4.12 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("West Specialty", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1125.19,-1872.93,   13.92 };
+						JumpToNewPos(&pos);
+					}
+				}
+			}
+		}
+		ImGui::Separator();
+#endif
+#if defined(GAME_MW) || defined(GAME_CARBON)
+		if (ImGui::CollapsingHeader("Landmarks (Most Wanted World)", ImGuiTreeNodeFlags_None))
+		{
+			if (ImGui::Button("Jump to Memory High Watermark", ImVec2(ImGui::CalcItemWidth(), 0)))
+			{
+				bVector3 pos = { 1113.0, 3221.0, 394.0 };
+				JumpToNewPos(&pos);
+			}
+			if (ImGui::CollapsingHeader("City Landmarks", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("East Park", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2085.00,  141.00,   98.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("West Park", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 709.00,  155.00,  115.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Stadium", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 934.00, -649.00,  116.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Time Square", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1452.05,  360.00,  101.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Little Italy", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2113.00,  322.00,  100.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Subway Entrance 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2147.00, 40.00, 94.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Subway Entrance 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 926.00, -556.00, 115.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Subway Entrance 3", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1819.00, 512.00, 94.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway North", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1819.00, 916.00, 124.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway South", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1972.00, -581.00, 105.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway East", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2515.00, 291.00, 93.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway West", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 499.00, 176.00, 108.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Safehouse", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2313.00, -70.00, 94.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Museum", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 885.00, 455.00, 113.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Amphitheatre", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 850.00, 246.00, 114.00 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Coastal Landmarks", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Coastal Safe House", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4254.00, 75.00, 11.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Coney Island", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4094.00, 166.00, 23.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Fish Market", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4629.00, 149.00, 7.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Oil Refinery", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3993.00, 2100.00, 28.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Fishing Village", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3693.00, 3516.00, 26.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Shipyard", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3107.00, 490.00, 18.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Trainyard", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2920.00, 175.00, 28.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Lighthouse", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4092.00, -173.00, 17.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Drive-in Theatre", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3144.00, 1661.00, 110.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3713.00, 3490.00, 27.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2749.00, 2159.00, 108.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 3", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3071.00, 1030.00, 67.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 4", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3836.00, 605.00, 25.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Trailer Park", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2871.00, 3004.00, 74.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Cannery", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3401.00, 2853.00, 12.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Fire Hall", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3878.00, 459.00, 23.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Amusement Park", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3944.00, 273.00, 17.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Boardwalk", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4542.00, 118.00, 6.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Prison", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4093.00, 1302.00, 45.00 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("College Landmarks", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("College Safe House", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1773.00, 2499.00, 150.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Rosewood Park", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 663.00, 4084.00, 210.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Golf Course", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2180.00, 3591.00, 165.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Campus", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1087.00, 3187.00, 202.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Main Street", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1606.00, 2210.00, 145.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Baseball Stadium", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 24.00, 3239.00, 195.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Club House", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2168.00, 3566.00, 162.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway North", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1830.00, 4288.00, 233.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway South", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1798.00, 2003.00, 152.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway East", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2259.00, 2616.00, 141.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Highway West", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -293.00, 3633.00, 207.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Toll Booth 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 378.00, 4502.00, 236.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Toll Booth 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1580.00, 1800.00, 168.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 1", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 822.00, 4500.00, 205.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 2", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1216.00, 3667.00, 201.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 3", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 549.00, 2622.00, 167.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 4", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1641.00, 2486.00, 152.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Gas Station 5", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1990.00, 1640.00, 152.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Small Parking Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1057.00, 3826.00, 201.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Large Parking Lot", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1227.00, 3259.00, 204.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Tennis Court", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 729.00, 3540.00, 201.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Stadium", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 43.00, 3154.00, 189.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Cemetary", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 846.00, 2439.00, 151.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Hospital", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1419.00, 2613.00, 164.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Fire Hall", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1510.00, 2144.00, 146.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Donut Shop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1825.00, 1860.00, 151.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Clock Tower", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1683.00, 2114.00, 146.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Strip Mall", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2633.00, 2199.00, 108.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Overpass", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2155.00, 2642.00, 148.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Bus Station", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 2094.00, 1427.00, 152.00 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Shops", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("North College Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 713.00, 4507.00, 214.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("College Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1513.00, 2550.00, 158.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("College Car", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 990.00, 2164.00, 154.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("North City Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1863.00, 1193.00, 146.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("City Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1086.00, 54.00, 101.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("City Car", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1762.00, 529.00, 93.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("South City Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3410.00, -203.00, 14.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("North Coastal Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3611.00, 3636.00, 31.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Refinery Coastal Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3467.00, 2019.00, 77.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Coastal Car", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4200.00, 1276.00, 48.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Coastal Chop", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4234.00, 714.00, 56.00 };
+					JumpToNewPos(&pos);
+				}
+			}
+		}
+		ImGui::Separator();
+		if (ImGui::CollapsingHeader("Landmarks (Carbon World)", ImGuiTreeNodeFlags_None))
+		{
+			if (ImGui::CollapsingHeader("Landmarks", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Tuner", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1912.00, 1363.00, 109.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Exotic", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 1175.00, 472.00, 60.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Casino", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 4794.00, 2040.00, 101.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Muscle", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3776.00, -1341.00, 12.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Santa Fe", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2088.00, 1942.00, -6.00 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Palmont Motor Speedway (drift track)", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -1131.29, 7754.64, 1.14 };
+					JumpToNewPos(&pos);
+				}
+			}
+			if (ImGui::CollapsingHeader("Pursuit Breakers", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::CollapsingHeader("Casino", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Casino Archway", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 3993.00, 3459.00, 208.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Casino Gas Homes", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 3909.00, 2844.00, 150.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Casino Donut", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 5271.00, 2119.00, 102.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Casino Motel", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 4840.00, 3364.00, 140.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Casino Petro", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 5351.00, 3426.00, 117.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Casino Scaffold", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 4041.00, 2419.00, 130.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Casino Gas Commercial", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 4281.00, 2152.00, 112.00 };
+						JumpToNewPos(&pos);
+					}
+				}
+				if (ImGui::CollapsingHeader("Muscle", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Muscle Facade", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 2763.00, -602.00, 17.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Muscle Ice Cream", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 2889.00, -1361.00, 4.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Muscle Tire", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 4403.00, -32.00, 37.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Muscle Dock Crane", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 2770.00, -612.00, 17.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Muscle Gas", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 4773.00, -780.00, 27.00 };
+						JumpToNewPos(&pos);
+					}
+				}
+				if (ImGui::CollapsingHeader("Santa Fe", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Santa Fe Scaffold", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -2416.00, 1997.00, 11.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Santa Fe Sculpture", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1854.00, 1891.00, 7.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Santa Fe Gas", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -2374.00, 1797.00, -5.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Santa Fe Thunderbird", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { -1967.00, 1695.00, 2.00 };
+						JumpToNewPos(&pos);
+					}
+				}
+				if (ImGui::CollapsingHeader("Tuner", ImGuiTreeNodeFlags_None))
+				{
+					if (ImGui::Button("Tuner Gate A", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 4180.00, 588.00, 48.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Tuner Gate B", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 3883.00, 689.00, 32.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Tuner Gas Park", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 5286.00, 1524.00, 68.00 };
+						JumpToNewPos(&pos);
+					}
+					if (ImGui::Button("Tuner Gas Financial", ImVec2(ImGui::CalcItemWidth(), 0)))
+					{
+						bVector3 pos = { 5563.00, 683.00, 57.00 };
+						JumpToNewPos(&pos);
+					}
+				}
+			}
+			if (ImGui::CollapsingHeader("Canyons", ImGuiTreeNodeFlags_None))
+			{
+				if (ImGui::Button("Eternity Pass", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -6328.50, 12952.43, 942.69 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Journeyman's Bane", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -3256.09, 9614.98, 721.28 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Knife's Edge", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -2498.47, 6215.55, 787.85 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Lookout Point", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 3471.10, 10693.66, 602.65 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Devil's Creek Pass", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 7381.51, 11080.98, 598.47 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Lofty Heights Downhill", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -3253.87, 12843.19, 723.47 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Desparation Ridge", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { -703.21, 12999.49, 888.32 };
+					JumpToNewPos(&pos);
+				}
+				if (ImGui::Button("Deadfall Junction", ImVec2(ImGui::CalcItemWidth(), 0)))
+				{
+					bVector3 pos = { 8139.83, 9541.43, 889.62 };
+					JumpToNewPos(&pos);
+				}
+			}
+		}
+#endif
+#ifdef GAME_UC
+		if (ImGui::CollapsingHeader("Landmarks (Undercover / MW2 World)", ImGuiTreeNodeFlags_None))
+		{
+			ImGui::TextUnformatted("Sorry, no landmarks for Undercover / MW2 yet :("); // TODO: make / rip landmarks for MW2 Free Roam
+		}
+		ImGui::Separator();
+#endif
+	}
+}
+// NFS CODE END
 void reshade::runtime::draw_code_editor()
 {
 	if (ImGui::Button(ICON_SAVE " Save", ImVec2(ImGui::GetContentRegionAvail().x, 0)) || _input->is_key_pressed('S', true, false, false))

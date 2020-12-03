@@ -921,11 +921,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		// Do not register Vulkan hooks, since Vulkan layering mechanism is used instead
 
 		// NFS INJECTION
-#ifndef GAME_UC
+
+#if defined(GAME_UC) || defined(GAME_PS)
+		injector::MakeJMP(FEMANAGER_RENDER_HOOKADDR1, ReShade_EntryPoint, true);
+		injector::MakeCALL(MAINSERVICE_HOOK_ADDR, MainService_Hook, true);
+#else
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR1, FEManager_Render_Hook, true);
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR2, FEManager_Render_Hook, true);
-#else
-		injector::MakeJMP(FEMANAGER_RENDER_HOOKADDR1, ReShade_EntryPoint, true);
 #endif
 
 		LOG(INFO) << "Initialized.";

@@ -22,6 +22,8 @@
 #include <stb_image_write.h>
 #include <stb_image_resize.h>
 
+
+
 bool resolve_path(std::filesystem::path &path)
 {
 	std::error_code ec;
@@ -152,6 +154,113 @@ void reshade::runtime::on_reset()
 
 	LOG(INFO) << "Destroyed runtime environment on runtime " << this << '.';
 }
+
+void reshade::runtime::on_nfs_present()
+{
+#if RESHADE_GUI
+	// Draw overlay // NFS CHANGE - we do this now in on_gui_present
+	//draw_gui();
+
+	if (_should_save_screenshot && _screenshot_save_ui && (_show_overlay || (_preview_texture != nullptr && _effects_enabled)))
+		save_screenshot(L" ui");
+#endif
+
+	// All screenshots were created at this point, so reset request
+	_should_save_screenshot = false;
+
+	// Reset frame statistics
+	_drawcalls = _vertices = 0;
+}
+
+void reshade::runtime::on_gui_present()
+{
+	// Get current time and date
+	const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	tm tm; localtime_s(&tm, &t);
+	_date[0] = tm.tm_year + 1900;
+	_date[1] = tm.tm_mon + 1;
+	_date[2] = tm.tm_mday;
+	_date[3] = tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec;
+
+	_framecount++;
+	const auto current_time = std::chrono::high_resolution_clock::now();
+	_last_frame_duration = current_time - _last_present_time;
+	_last_present_time = current_time;
+
+#ifdef NDEBUG
+	// Lock input so it cannot be modified by other threads while we are reading it here
+	const auto input_lock = _input->lock();
+#endif
+
+#if RESHADE_GUI
+	// Draw overlay
+	draw_gui();
+#endif
+
+	// Handle keyboard shortcuts
+	if (!_ignore_shortcuts)
+	{
+		if (_input->is_key_pressed(_effects_key_data, _force_shortcut_modifiers))
+			_effects_enabled = !_effects_enabled;
+
+		if (_input->is_key_pressed(_screenshot_key_data, _force_shortcut_modifiers))
+			_should_save_screenshot = true; // Notify 'update_and_render_effects' that we want to save a screenshot next frame
+
+		// Do not allow the next shortcuts while effects are being loaded or compiled (since they affect that state)
+		if (!is_loading() && _reload_compile_queue.empty())
+		{
+			if (_input->is_key_pressed(_reload_key_data, _force_shortcut_modifiers))
+				load_effects();
+
+			if (_input->is_key_pressed(_performance_mode_key_data, _force_shortcut_modifiers))
+			{
+				_performance_mode = !_performance_mode;
+				save_config();
+				load_effects();
+			}
+
+			if (const bool reversed = _input->is_key_pressed(_prev_preset_key_data, _force_shortcut_modifiers);
+				reversed || _input->is_key_pressed(_next_preset_key_data, _force_shortcut_modifiers))
+			{
+				// The preset shortcut key was pressed down, so start the transition
+				if (switch_to_next_preset(_current_preset_path.parent_path(), reversed))
+				{
+					_last_preset_switching_time = current_time;
+					_is_in_between_presets_transition = true;
+					save_config();
+				}
+			}
+
+			// Continuously update preset values while a transition is in progress
+			if (_is_in_between_presets_transition)
+				load_current_preset();
+		}
+	}
+
+	// Reset input status
+	_input->next_frame();
+
+	// Save modified INI files
+	if (!ini_file::flush_cache())
+		_preset_save_success = false;
+
+	// Detect high network traffic
+	static int cooldown = 0, traffic = 0;
+	if (cooldown-- > 0)
+	{
+		traffic += g_network_traffic > 0;
+	}
+	else
+	{
+		_has_high_network_activity = traffic > 10;
+		traffic = 0;
+		cooldown = 60;
+	}
+
+	// Reset frame statistics
+	g_network_traffic = 0;
+}
+
 void reshade::runtime::on_present()
 {
 	// Get current time and date

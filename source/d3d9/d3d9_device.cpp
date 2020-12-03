@@ -284,7 +284,7 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::Present(const RECT *pSourceRect, cons
 {
 	// Only call into runtime if the entire surface is presented, to avoid partial updates messing up effects and the GUI
 	//if (Direct3DSwapChain9::is_presenting_entire_surface(pSourceRect, hDestWindowOverride))
-	//	_implicit_swapchain->_runtime->on_present();
+	//	_implicit_swapchain->_runtime->on_gui_present();
 	//_buffer_detection.reset(false);
 
 	return _orig->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
@@ -769,7 +769,7 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::ComposeRects(IDirect3DSurface9 *pSrc,
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::PresentEx(const RECT *pSourceRect, const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion, DWORD dwFlags)
 {
 	if (Direct3DSwapChain9::is_presenting_entire_surface(pSourceRect, hDestWindowOverride))
-		_implicit_swapchain->_runtime->on_present();
+		_implicit_swapchain->_runtime->on_gui_present();
 	_buffer_detection.reset(false);
 
 	assert(_extended_interface);
@@ -899,17 +899,7 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetDisplayModeEx(UINT iSwapChain, D3D
 	return static_cast<IDirect3DSwapChain9Ex *>(_implicit_swapchain)->GetDisplayModeEx(pMode, pRotation);
 }
 
-#ifndef GAME_UC
-void(__thiscall* FEManager_Render)(unsigned int dis) = (void(__thiscall*)(unsigned int))FEMANAGER_RENDER_ADDRESS;
-void __stdcall FEManager_Render_Hook()
-{
-	unsigned int TheThis = 0;
-	_asm mov TheThis, ecx
-	Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
-	g_pd3dDevice->_implicit_swapchain->_runtime->on_nfs_present(); // render ReShade BEFORE FE renders ingame! TODO: dig deeper and make ONLY ReShade UI above the FE!
-	return FEManager_Render(TheThis);
-}
-#else
+#if defined(GAME_UC) || defined(GAME_PS)
 void __stdcall ReShade_Hook()
 {
 	Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
@@ -927,5 +917,15 @@ void __declspec(naked) ReShade_EntryPoint()
 		_asm jmp NFSUC_ExitPoint1
 	_asm jmp NFSUC_ExitPoint2
 }
+#else
+void(__thiscall* FEManager_Render)(unsigned int dis) = (void(__thiscall*)(unsigned int))FEMANAGER_RENDER_ADDRESS;
+void __stdcall FEManager_Render_Hook()
+{
+	unsigned int TheThis = 0;
+	_asm mov TheThis, ecx
+	Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
 
+	g_pd3dDevice->_implicit_swapchain->_runtime->on_nfs_present(); // render ReShade BEFORE FE renders ingame! TODO: dig deeper and make ONLY ReShade UI above the FE! MW done!
+	FEManager_Render(TheThis);
+}
 #endif

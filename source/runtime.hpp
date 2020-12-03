@@ -152,6 +152,17 @@ namespace reshade
 		/// Callback function called every frame.
 		/// </summary>
 		void on_present();
+		/// <summary>
+		/// Callback function called every frame.
+		/// </summary>
+		void on_gui_present();
+		/// <summary>
+		/// Callback function called every frame.
+		/// </summary>
+		void on_nfs_present();
+		/// <summary>
+		/// Callback function called every frame.
+		/// </summary>
 
 		/// <summary>
 		/// Compile effect from the specified source file and initialize textures, uniforms and techniques.

@@ -10,6 +10,25 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <d3dcompiler.h>
+ // NFS changes
+#ifdef GAME_MW
+#include "NFSMW_PreFEngHook.h"
+#endif
+#ifdef GAME_CARBON
+#include "NFSC_PreFEngHook.h"
+#endif
+#ifdef GAME_UG2
+#include "NFSU2_PreFEngHook.h"
+#endif
+#ifdef GAME_UG
+#include "NFSU_PreFEngHook.h"
+#endif
+#ifdef GAME_PS
+#include "NFSPS_PreFEngHook.h"
+#endif
+#ifdef GAME_UC
+#include "NFSUC_PreFEngHook.h"
+#endif
 
 namespace reshade::d3d9
 {
@@ -242,7 +261,6 @@ void reshade::d3d9::runtime_d3d9::on_nfs_present()
 	update_depth_texture_bindings(_has_high_network_activity ? nullptr :
 		_buffer_detection->find_best_depth_surface(_filter_aspect_ratio ? _width : 0, _height, _depth_surface_override));
 #endif
-
 	_app_state.capture();
 	BOOL software_rendering_enabled = FALSE;
 	if ((_behavior_flags & D3DCREATE_MIXED_VERTEXPROCESSING) != 0)
@@ -254,16 +272,16 @@ void reshade::d3d9::runtime_d3d9::on_nfs_present()
 		_device->StretchRect(_backbuffer.get(), nullptr, _backbuffer_resolved.get(), nullptr, D3DTEXF_NONE);
 
 	update_and_render_effects();
-	runtime::on_present();
-
+	runtime::on_nfs_present();
+	runtime::on_gui_present();
 	// Stretch main render target back into MSAA back buffer if MSAA is active
 	if (_backbuffer_resolved != _backbuffer)
 		_device->StretchRect(_backbuffer_resolved.get(), nullptr, _backbuffer.get(), nullptr, D3DTEXF_NONE);
 
-	// Apply previous state from application
-	_app_state.apply_and_release();
 	if ((_behavior_flags & D3DCREATE_MIXED_VERTEXPROCESSING) != 0)
 		_device->SetSoftwareVertexProcessing(software_rendering_enabled);
+	// Apply previous state from application
+	_app_state.apply_and_release();
 
 #if RESHADE_DEPTH
 	// Can only reset the tracker after the state block has been applied, to ensure current depth-stencil binding is updated correctly
@@ -274,7 +292,22 @@ void reshade::d3d9::runtime_d3d9::on_nfs_present()
 	}
 #endif
 
-	//_device->EndScene();
+}
+
+void reshade::d3d9::runtime_d3d9::on_gui_present()
+{
+	if (!_is_initialized || FAILED(_device->BeginScene()))
+		return;
+	assert(_buffer_detection != nullptr);
+
+	_app_state.capture();
+
+	runtime::on_gui_present();
+
+	// Apply previous state from application
+	_app_state.apply_and_release();
+
+	_device->EndScene();
 }
 
 void reshade::d3d9::runtime_d3d9::on_present()
