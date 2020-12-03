@@ -925,6 +925,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 #if defined(GAME_UC) || defined(GAME_PS)
 		injector::MakeJMP(FEMANAGER_RENDER_HOOKADDR1, ReShade_EntryPoint, true);
 		injector::MakeCALL(MAINSERVICE_HOOK_ADDR, MainService_Hook, true);
+#ifdef GAME_UC
+		injector::MakeJMP(NFSUC_MOTIONBLUR_HOOK_ADDR, MotionBlur_EntryPoint, true);
+#endif
 #else
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR1, FEManager_Render_Hook, true);
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR2, FEManager_Render_Hook, true);

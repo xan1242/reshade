@@ -900,9 +900,28 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetDisplayModeEx(UINT iSwapChain, D3D
 }
 
 #if defined(GAME_UC) || defined(GAME_PS)
+#ifdef GAME_UC
+bool bGlobalMotionBlur = false;
+int NFSUC_MOTIONBLUR_ExitPointTrue = NFSUC_MOTIONBLUR_EXIT_TRUE;
+int NFSUC_MOTIONBLUR_ExitPointFalse = NFSUC_MOTIONBLUR_EXIT_FALSE;
+void __declspec(naked) MotionBlur_EntryPoint()
+{
+	if (!bGlobalMotionBlur)
+		_asm jmp NFSUC_MOTIONBLUR_ExitPointFalse
+	_asm
+	{
+		push 0xA
+		mov ecx, 0xDF1DE0
+		jmp NFSUC_MOTIONBLUR_ExitPointTrue
+	}
+}
+#endif
 void __stdcall ReShade_Hook()
 {
 	Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
+#ifdef GAME_UC
+	bGlobalMotionBlur = g_pd3dDevice->_implicit_swapchain->_runtime->bMotionBlur; // hax for MotionBlur toggle because we can't read from runtime in the game...
+#endif
 	g_pd3dDevice->_implicit_swapchain->_runtime->on_nfs_present(); // render ReShade BEFORE FE renders ingame! TODO: dig deeper and make ONLY ReShade UI above the FE!
 }
 
@@ -917,6 +936,8 @@ void __declspec(naked) ReShade_EntryPoint()
 		_asm jmp NFSUC_ExitPoint1
 	_asm jmp NFSUC_ExitPoint2
 }
+
+
 #else
 void(__thiscall* FEManager_Render)(unsigned int dis) = (void(__thiscall*)(unsigned int))FEMANAGER_RENDER_ADDRESS;
 void __stdcall FEManager_Render_Hook()

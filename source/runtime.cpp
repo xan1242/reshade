@@ -23,7 +23,6 @@
 #include <stb_image_resize.h>
 
 
-
 bool resolve_path(std::filesystem::path &path)
 {
 	std::error_code ec;
@@ -1494,6 +1493,10 @@ void reshade::runtime::load_config()
 	config.get("SCREENSHOTS", "SavePath", _screenshot_path);
 	config.get("SCREENSHOTS", "SavePresetFile", _screenshot_include_preset);
 
+#ifdef GAME_UC
+	config.get("NFS", "MotionBlur", bMotionBlur);
+#endif
+
 	for (const auto &callback : _load_config_callables)
 		callback(config);
 }
@@ -1533,6 +1536,10 @@ void reshade::runtime::save_config() const
 	config.set("SCREENSHOTS", "SaveOverlayShot", _screenshot_save_ui);
 	config.set("SCREENSHOTS", "SavePath", _screenshot_path);
 	config.set("SCREENSHOTS", "SavePresetFile", _screenshot_include_preset);
+
+#ifdef GAME_UC
+	config.set("NFS", "MotionBlur", bMotionBlur);
+#endif
 
 	for (const auto &callback : _save_config_callables)
 		callback(config);

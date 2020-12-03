@@ -2116,11 +2116,22 @@ void __stdcall JumpToNewPos(bVector3* pos)
 
 void reshade::runtime::draw_gui_nfs()
 {
+	bool modified = false;
+
 	ImGui::TextUnformatted("NFS Tweak Menu");
 	ImGui::Separator();
 	ImGui::Checkbox("Draw FrontEnd", (bool*)DRAW_FENG_BOOL_ADDR);
 #ifdef GAME_UC
-	ImGui::SliderFloat("Bloom Scale", (float*)0x00D5E154, -10.0, 10.0, "%.3f", ImGuiSliderFlags_None);
+	if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_None))
+	{
+		if (ImGui::Checkbox("Motion Blur", &bMotionBlur))
+		{
+			bMotionBlur != bMotionBlur;
+			modified = true;
+		}
+
+		ImGui::SliderFloat("Bloom Scale", (float*)0x00D5E154, -10.0, 10.0, "%.3f", ImGuiSliderFlags_None);
+	}
 #endif
 #ifndef OLD_NFS
 	if (ImGui::CollapsingHeader("Car", ImGuiTreeNodeFlags_None))
@@ -3220,6 +3231,8 @@ void reshade::runtime::draw_gui_nfs()
 		ImGui::Separator();
 #endif
 	}
+	if (modified)
+		save_config();
 }
 // NFS CODE END
 void reshade::runtime::draw_code_editor()

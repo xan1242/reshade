@@ -135,6 +135,9 @@ namespace reshade
 		/// <param name="function">The callback function.</param>
 		void subscribe_to_save_config(std::function<void(ini_file &)> function);
 
+#ifdef GAME_UC
+		bool bMotionBlur;
+#endif
 	protected:
 		runtime();
 		virtual ~runtime();
