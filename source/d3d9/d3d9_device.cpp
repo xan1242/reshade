@@ -27,6 +27,8 @@
 #include "NFSUC_PreFEngHook.h"
 #endif
 
+Direct3DDevice9* g_pd3dDevice;
+
 extern void dump_and_modify_present_parameters(D3DPRESENT_PARAMETERS &pp, IDirect3D9 *d3d, UINT adapter_index);
 extern void dump_and_modify_present_parameters(D3DPRESENT_PARAMETERS &pp, D3DDISPLAYMODEEX &fullscreen_desc, IDirect3D9Ex *d3d, UINT adapter_index);
 
@@ -35,6 +37,7 @@ Direct3DDevice9::Direct3DDevice9(IDirect3DDevice9   *original, bool use_software
 	_extended_interface(0),
 	_use_software_rendering(use_software_rendering),
 	_buffer_detection(original) {
+	g_pd3dDevice = this;
 	assert(_orig != nullptr);
 }
 Direct3DDevice9::Direct3DDevice9(IDirect3DDevice9Ex *original, bool use_software_rendering) :
@@ -42,6 +45,7 @@ Direct3DDevice9::Direct3DDevice9(IDirect3DDevice9Ex *original, bool use_software
 	_extended_interface(1),
 	_use_software_rendering(use_software_rendering),
 	_buffer_detection(original) {
+	g_pd3dDevice = this;
 	assert(_orig != nullptr);
 }
 
@@ -107,6 +111,7 @@ ULONG   STDMETHODCALLTYPE Direct3DDevice9::Release()
 #if RESHADE_VERBOSE_LOG
 	LOG(DEBUG) << "Destroyed IDirect3DDevice9" << (_extended_interface ? "Ex" : "") << " object " << this << '.';
 #endif
+	g_pd3dDevice = NULL;
 	delete this;
 
 	return 0;
@@ -277,7 +282,7 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::Reset(D3DPRESENT_PARAMETERS *pPresent
 		_orig->GetDepthStencilSurface(&_auto_depthstencil);
 		SetDepthStencilSurface(_auto_depthstencil.get());
 	}
-
+	g_pd3dDevice = this;
 	return hr;
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::Present(const RECT *pSourceRect, const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion)
@@ -432,6 +437,7 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetDepthStencilSurface(IDirect3DSurfa
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::BeginScene()
 {
+	//g_pd3dDevice = _runtime
 	return _orig->BeginScene();
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::EndScene()
@@ -768,9 +774,9 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::ComposeRects(IDirect3DSurface9 *pSrc,
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::PresentEx(const RECT *pSourceRect, const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion, DWORD dwFlags)
 {
-	if (Direct3DSwapChain9::is_presenting_entire_surface(pSourceRect, hDestWindowOverride))
-		_implicit_swapchain->_runtime->on_gui_present();
-	_buffer_detection.reset(false);
+	//if (Direct3DSwapChain9::is_presenting_entire_surface(pSourceRect, hDestWindowOverride))
+	//	_implicit_swapchain->_runtime->on_gui_present();
+	//_buffer_detection.reset(false);
 
 	assert(_extended_interface);
 	return static_cast<IDirect3DDevice9Ex *>(_orig)->PresentEx(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion, dwFlags);
@@ -944,7 +950,10 @@ void __stdcall FEManager_Render_Hook()
 {
 	unsigned int TheThis = 0;
 	_asm mov TheThis, ecx
-	Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
+	// TexMod "fix"
+	// since TexMod is a hacky and leechy piece of garbage, we have to use regular pointers to D3D9 functions... without TexMod it works fine so there's that
+	// NOTE FOR MODDERS: Please, for the love of everything that exists AVOID USING TEXMOD
+	//Direct3DDevice9* g_pd3dDevice = *(Direct3DDevice9**)NFS_D3D9_DEVICE_ADDRESS;
 
 	g_pd3dDevice->_implicit_swapchain->_runtime->on_nfs_present(); // render ReShade BEFORE FE renders ingame! TODO: dig deeper and make ONLY ReShade UI above the FE! MW done!
 	FEManager_Render(TheThis);
