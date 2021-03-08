@@ -1,6 +1,11 @@
 # FORK NOTE
 This is a special build of ReShade catered to NFS games made by EA Black Box.
-Currently the only difference is that the rendering is done BEFORE FrontEnd, so the UI isn't affected by post-processing effects.
+
+It set to render before FrontEnd graphics, so the UI isn't affected by post-processing effects.
+
+Also is included a special "NFS Tweaks" menu which contains a set of special and debugging features designed to manipulate the game in various ways (some of which are ported straight from the debug builds).
+
+A LOT is left on the todo list, such as merging with the latest branch of ReShade and adding a bunch of more features, but the biggest one so far is getting dear imgui to render before FrontEnd.
 
 # ORIGINAL DESCRIPTION
 

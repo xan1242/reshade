@@ -922,15 +922,40 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 
 		// NFS INJECTION
 
-#if defined(GAME_UC) || defined(GAME_PS)
+#ifdef NFS_MULTITHREAD
 		injector::MakeJMP(FEMANAGER_RENDER_HOOKADDR1, ReShade_EntryPoint, true);
 		injector::MakeCALL(MAINSERVICE_HOOK_ADDR, MainService_Hook, true);
-#ifdef GAME_UC
-		injector::MakeJMP(NFSUC_MOTIONBLUR_HOOK_ADDR, MotionBlur_EntryPoint, true);
-#endif
 #else
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR1, FEManager_Render_Hook, true);
 		injector::MakeCALL(FEMANAGER_RENDER_HOOKADDR2, FEManager_Render_Hook, true);
+#endif
+#ifdef GAME_MW
+		injector::MakeNOP(GAMEFLOW_UNLOADTRACK_FIX, 5, true);
+#endif
+#ifdef GAME_CARBON
+		injector::MakeCALL(INFINITENOS_HOOK, EasterEggCheck_Hook, true);
+		//injector::MakeCALL(INFINITERB_HOOK, EasterEggCheck_Hook, true); // unnecessary, but left here
+#endif
+#ifdef GAME_PS
+		injector::MakeJMP(AICONTROL_CAVE_ADDR, ToggleAIControlCave, true);
+		injector::MakeJMP(INFINITENOS_CAVE_ADDR, InfiniteNOSCave, true);
+		injector::MakeJMP(GAMESPEED_CAVE_ADDR, GameSpeedCave, true);
+		injector::MakeJMP(DRAWWORLD_CAVE_ADDR, DrawWorldCave, true);
+		injector::WriteMemory<char>(SKIPFE_PLAYERCAR_DEHARDCODE_PATCH_ADDR, 0xA1, true);
+		injector::WriteMemory<int>(SKIPFE_PLAYERCAR_DEHARDCODE_PATCH_ADDR + 1, SKIPFE_PLAYERCAR_ADDR, true);
+#endif
+#ifdef GAME_UC
+		injector::MakeJMP(NFSUC_MOTIONBLUR_HOOK_ADDR, MotionBlur_EntryPoint, true);
+		injector::MakeJMP(INFINITENOS_CAVE_ADDR, InfiniteNOSCave, true);
+		injector::MakeJMP(AICONTROL_CAVE_ADDR, ToggleAIControlCave, true);
+#endif
+#ifdef GAME_UG2
+		injector::MakeCALL(SETRAIN_HOOK_ADDR, SetRainBase_Custom, true);
+#endif
+#ifdef HAS_COPS
+#ifndef GAME_UC
+		injector::MakeCALL(HEATONEVENTWIN_HOOK_ADDR, FECareerRecord_AdjustHeatOnEventWin_Hook, true);
+#endif
 #endif
 
 		LOG(INFO) << "Initialized.";
